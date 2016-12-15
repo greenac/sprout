@@ -1,9 +1,8 @@
 'use strict';
 
-let _ = require('underscore');
-let moment = require('moment');
-let config = require('./../config');
-let fs = require('fs');
+const moment = require('moment');
+const config = require('./../config');
+const fs = require('fs');
 
 module.exports = function() {
     let message = moment.utc().format() + ' :: ';
@@ -25,7 +24,7 @@ module.exports = function() {
         message += '\n';
         fs.appendFile(config.paths.logPath, message, function(error) {
             if (error) {
-                console.log('Error: failed to write to log at:', config.logFilePath);
+                console.log('Error: failed to write to log at:', config.paths.logPath);
             }
         });
     }
