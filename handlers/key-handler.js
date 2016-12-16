@@ -6,6 +6,51 @@ const config = require('./../config');
 const logger = require('./../utils/logger');
 const async = require('async');
 const fs = require('fs');
+const _ = require('underscore');
+
+
+const parseAsn1Text = function(asn1text) {
+    let lines = asn1text.split('\n');
+    let parsedLines = [];
+    for (let i=0; i < lines.length; i++) {
+        if (lines[i] === '') {
+            continue;
+        }
+
+        parsedLines.push(parseAsn1Line(lines[i]));
+    }
+
+    return parsedLines;
+};
+
+const parseAsn1Line = function(line) {
+    line = line.replace(/\s/g, '');
+    let index = 0;
+    let info = {};
+
+    info.start = getNumberFromAns1String(line, index);
+
+    index = line.indexOf('hl=');
+    index += 3;
+    info.headerLength = getNumberFromAns1String(line, index);
+
+    index = line.indexOf('l=', index);
+    index += 2;
+    info.length = getNumberFromAns1String(line, index);
+
+    return info;
+};
+
+const getNumberFromAns1String = function(ans1String, startIndex) {
+    let length = 1;
+    let i = startIndex;
+    while (!isNaN(ans1String[i])) {
+        length += 1;
+        i += 1;
+    }
+
+    return parseInt(ans1String.substring(startIndex, startIndex + length + 1));
+};
 
 
 /**
@@ -25,6 +70,7 @@ function KeyHandler(curve='prime256v1', hash='sha256') {
     this._signature = null;
     this._textToSign = null;
     this._signingHash = hash;
+    this._asn1parsedData = null;
 }
 
 /**
@@ -91,14 +137,18 @@ KeyHandler.prototype.sign = function(toSign, keyText, callback) {
             this._createPemFileFromRawText.bind(this),
             this._createTextToSignFile.bind(this),
             this._createSignatureFile.bind(this),
+            this._asn1parseSignedFile.bind(this),
             this._readSignatureFile.bind(this),
-            this._cleanUpSignatureFile.bind(this)
+            this._cleanUpKeyFile.bind(this),
+            this._cleanUpSignatureFile.bind(this),
+            this._cleanUpSignatureTextFile.bind(this)
         ], function(error) {
             if (error) {
                 logger('Error signing:', toSign, '. Failed with error:', error);
                 callback(error, null);
                 return;
             }
+
 
             callback(null, this._signature);
         }.bind(this)
@@ -275,6 +325,11 @@ KeyHandler.prototype._createSignatureFile = function(callback) {
 };
 
 KeyHandler.prototype._readSignatureFile = function(callback) {
+    if (!this._asn1parsedData || this._asn1parsedData.length < 3) {
+        callback(new Error('No asn1 parsed data or it is in the wrong format'));
+        return;
+    }
+
     fs.stat(this._signatureFilePath(), function(error, fileStatus) {
             if (error) {
                 callback(error);
@@ -287,7 +342,23 @@ KeyHandler.prototype._readSignatureFile = function(callback) {
             }
 
             fs.readFile(this._signatureFilePath(), function(error, signature) {
-                this._signature = signature;
+                const radiusInfo = this._asn1parsedData[1];
+                const arcInfo = this._asn1parsedData[2];
+                const firstKey = signature.slice(
+                    radiusInfo.start + radiusInfo.headerLength,
+                    radiusInfo.start + radiusInfo.headerLength + radiusInfo.length
+                );
+                const secondKey = signature.slice(
+                    arcInfo.start + arcInfo.headerLength,
+                    arcInfo.start + arcInfo.headerLength + arcInfo.length
+                );
+
+                const reducedFirstKey = (firstKey.length > 32 && firstKey[0] === 0x00)
+                    ? firstKey.slice(1, firstKey.length) : firstKey;
+                const reducedSecondKey = (secondKey.length > 32 && secondKey[0] === 0x00)
+                    ? secondKey.slice(1, secondKey.length) : secondKey;
+
+                this._signature = Buffer.concat([reducedFirstKey, reducedSecondKey]);
                 callback();
             }.bind(this));
         }.bind(this)
@@ -380,10 +451,31 @@ KeyHandler.prototype._cleanUpSignatureTextFile = function(callback) {
     );
 };
 
-KeyHandler.prototype.cleanedSignedData = function(signedData) {
-    const firstKey = signedData.slice(4, 36);
-    const secondKey = signedData.slice(signedData.length - 32, signedData.length);
-    return Buffer.concat([firstKey, secondKey]);
+KeyHandler.prototype._asn1parseSignedFile = function(callback) {
+    fs.stat(this._signatureFilePath(), function(error, fileStatus) {
+            if (error) {
+                callback(error);
+                return;
+            }
+
+            if (!fileStatus.isFile()) {
+                callback(new Error('No signature file at: ' + this._signatureFilePath()));
+                return;
+            }
+
+            const command = 'openssl asn1parse -inform DER -in ' + this._signatureFilePath();
+            childProcess.exec(command, function(error, stdout, stderr) {
+                if (error) {
+                    logger('Error: creating elliptical keys with child process.');
+                    callback(error);
+                    return;
+                }
+
+                this._asn1parsedData = parseAsn1Text(stdout);
+                callback();
+            }.bind(this));
+        }.bind(this)
+    );
 };
 
 /**

@@ -59,10 +59,8 @@ if (process.argv.length > 2 && process.argv[process.argv.length - 1] === 'query'
             return;
         }
 
-        logger(keys);
-
         const keyHandler2 = new KeyHandler();
-        keyHandler2.sign('I saw the sign!', keys, function(error, signedData) {
+        keyHandler2.sign('We the people of the us', keys, function(error, signedData) {
             if (error) {
                 logger(error);
                 return;
@@ -70,33 +68,6 @@ if (process.argv.length > 2 && process.argv[process.argv.length - 1] === 'query'
 
             logger('signed data:', signedData.toString('hex'));
             logger('signed data length:', signedData.length);
-
-            const cleanedData = keyHandler2.cleanedSignedData(signedData);
-            logger('cleaned data:', cleanedData.toString('hex'));
-            logger('cleaned data length:', cleanedData.length);
-        });
-
-    });
-} else if (process.argv.length > 2 && process.argv[process.argv.length - 1] === 'sign') {
-    const KeyHandler = require('./handlers/key-handler');
-    const async = require('async');
-
-    const keyHandler = new KeyHandler();
-    keyHandler.getRawKeys(function(error, keysText) {
-        if (error) {
-            logger(error);
-            return;
-        }
-
-        const otherKeyHandler = new KeyHandler();
-        otherKeyHandler.sign("Hi I'm some data to sign!", keysText, function(error, signedData) {
-            if (error) {
-                logger(error);
-                return;
-            }
-
-            logger('got text from file:', keysText);
-            logger('got signed data:', signedData);
         });
     });
 } else {
